@@ -77,6 +77,9 @@ class TaskStatusResponse(BaseModel):
 # In-memory task storage for tracking
 task_storage: Dict[str, Dict] = {}
 
+# In-memory account locks for preventing concurrent logins
+account_locks: Dict[str, str] = {}  # account_id -> task_id
+
 @app.get("/")
 async def root():
     """Health check endpoint"""
@@ -97,15 +100,35 @@ async def health_check():
 
 async def execute_blog_posting_task(task_id: str, post_data: dict, naver_account: dict):
     """
-    Execute blog posting task immediately in background
+    Execute blog posting task immediately in background with account locking
     """
+    account_id = naver_account.get("id", "unknown")
+    
     try:
+        # Check if account is already locked by another task
+        if account_id in account_locks and account_locks[account_id] != task_id:
+            locked_by_task = account_locks[account_id]
+            # Check if the locking task is still active
+            if locked_by_task in task_storage and task_storage[locked_by_task]["status"] in ["pending", "in_progress"]:
+                raise Exception(f"네이버 계정 '{account_id}'가 다른 작업에서 사용 중입니다. 잠시 후 다시 시도해주세요.")
+            else:
+                # Remove stale lock
+                del account_locks[account_id]
+        
+        # Acquire account lock
+        account_locks[account_id] = task_id
+        logger.info("Account lock acquired", account_id=account_id, task_id=task_id)
+        
         # Update task status to in_progress
         task_storage[task_id]["status"] = "in_progress"
         task_storage[task_id]["progress"] = 10
+        task_storage[task_id]["account_id"] = account_id
         
         # Create BlogPoster instance and execute
         blog_poster = BlogPoster()
+        
+        # Update progress
+        task_storage[task_id]["progress"] = 20
         
         # Execute blog posting
         result = await asyncio.to_thread(
@@ -119,7 +142,8 @@ async def execute_blog_posting_task(task_id: str, post_data: dict, naver_account
         task_storage[task_id]["progress"] = 100
         task_storage[task_id]["result"] = result
         
-        logger.info("Blog posting completed successfully", task_id=task_id)
+        logger.info("Blog posting completed successfully", 
+                   task_id=task_id, account_id=account_id)
         
     except Exception as e:
         # Update task status to failed
@@ -127,7 +151,14 @@ async def execute_blog_posting_task(task_id: str, post_data: dict, naver_account
         task_storage[task_id]["error"] = str(e)
         task_storage[task_id]["progress"] = 0
         
-        logger.error("Blog posting failed", task_id=task_id, error=str(e))
+        logger.error("Blog posting failed", 
+                    task_id=task_id, account_id=account_id, error=str(e))
+        
+    finally:
+        # Always release account lock
+        if account_id in account_locks and account_locks[account_id] == task_id:
+            del account_locks[account_id]
+            logger.info("Account lock released", account_id=account_id, task_id=task_id)
 
 @app.post("/api/blog/post", response_model=TaskResponse)
 async def create_blog_post(request: BlogPostRequest, background_tasks: BackgroundTasks):
@@ -205,6 +236,14 @@ async def cancel_task(task_id: str):
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
     
     try:
+        task_info = task_storage[task_id]
+        
+        # Release account lock if task holds one
+        account_id = task_info.get("account_id")
+        if account_id and account_id in account_locks and account_locks[account_id] == task_id:
+            del account_locks[account_id]
+            logger.info("Account lock released on cancellation", account_id=account_id, task_id=task_id)
+        
         # Update task status to cancelled
         task_storage[task_id]["status"] = "cancelled"
         
@@ -215,6 +254,24 @@ async def cancel_task(task_id: str):
     except Exception as e:
         logger.error("Failed to cancel task", task_id=task_id, error=str(e))
         raise HTTPException(status_code=500, detail=f"작업 취소 실패: {str(e)}")
+
+@app.get("/api/blog/account-status")
+async def get_account_status():
+    """
+    Get current account lock status for debugging
+    """
+    return {
+        "locked_accounts": list(account_locks.keys()),
+        "locks": [
+            {
+                "account_id": account_id,
+                "task_id": task_id,
+                "task_status": task_storage.get(task_id, {}).get("status", "unknown")
+            }
+            for account_id, task_id in account_locks.items()
+        ],
+        "timestamp": datetime.now().isoformat()
+    }
 
 if __name__ == "__main__":
     import uvicorn

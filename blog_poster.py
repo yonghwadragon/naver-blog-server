@@ -2,6 +2,9 @@
 import os
 import time
 import structlog
+import uuid
+import tempfile
+import shutil
 from typing import Optional
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -28,11 +31,18 @@ class BlogPoster:
     def __init__(self):
         self.driver = None
         self.wait = None
+        self.user_data_dir = None
+        self.session_id = str(uuid.uuid4())
         
-    def _init_driver(self) -> webdriver.Chrome:
-        """Initialize Chrome WebDriver with optimized settings"""
+    def _init_driver(self, account_id: str) -> webdriver.Chrome:
+        """Initialize Chrome WebDriver with isolated profile per account"""
         try:
-            logger.info("Initializing Chrome driver")
+            logger.info("Initializing Chrome driver with isolated profile", 
+                       account_id=account_id, session_id=self.session_id)
+            
+            # Create isolated user data directory for this account
+            self.user_data_dir = tempfile.mkdtemp(prefix=f'naver-{account_id}-{self.session_id[:8]}-')
+            logger.info("Created isolated profile directory", user_data_dir=self.user_data_dir)
             
             opts = Options()
             
@@ -42,6 +52,11 @@ class BlogPoster:
             opts.add_argument("--disable-dev-shm-usage")
             opts.add_argument("--disable-gpu")
             opts.add_argument("--window-size=1920,1080")
+            
+            # Isolated user profile for security
+            opts.add_argument(f"--user-data-dir={self.user_data_dir}")
+            opts.add_argument("--disable-web-security")
+            opts.add_argument("--disable-features=VizDisplayCompositor")
             
             # Performance optimizations
             opts.add_argument("--disable-extensions")
@@ -58,12 +73,25 @@ class BlogPoster:
             driver = webdriver.Chrome(service=service, options=opts)
             driver.set_page_load_timeout(30)
             
-            logger.info("Chrome driver initialized successfully")
+            logger.info("Chrome driver initialized successfully with isolated profile")
             return driver
             
         except Exception as e:
             logger.error("Failed to initialize Chrome driver", error=str(e))
+            self._cleanup_profile()  # Clean up on failure
             raise Exception(f"브라우저 초기화 실패: {str(e)}")
+    
+    def _cleanup_profile(self):
+        """Clean up the isolated user profile directory"""
+        if self.user_data_dir and os.path.exists(self.user_data_dir):
+            try:
+                shutil.rmtree(self.user_data_dir, ignore_errors=True)
+                logger.info("Cleaned up profile directory", user_data_dir=self.user_data_dir)
+            except Exception as e:
+                logger.warning("Failed to clean up profile directory", 
+                              user_data_dir=self.user_data_dir, error=str(e))
+            finally:
+                self.user_data_dir = None
     
     def _naver_login(self, naver_id: str, naver_password: str):
         """Login to Naver"""
@@ -170,15 +198,18 @@ class BlogPoster:
     
     def post_to_naver_blog(self, post_data: dict, naver_account: dict) -> dict:
         """
-        Main method to post a blog entry to Naver blog
+        Main method to post a blog entry to Naver blog with security isolation
         """
+        account_id = naver_account.get("id", "unknown")
+        
         try:
-            logger.info("Starting blog posting task", 
+            logger.info("Starting blog posting task with isolated session", 
                        title=post_data.get("title"), 
-                       naver_id=naver_account.get("id"))
+                       naver_id=account_id,
+                       session_id=self.session_id)
             
-            # Initialize driver
-            self.driver = self._init_driver()
+            # Initialize driver with isolated profile
+            self.driver = self._init_driver(account_id)
             self.wait = WebDriverWait(self.driver, 15)
             
             # Login to Naver
@@ -198,21 +229,28 @@ class BlogPoster:
                 "message": "네이버 블로그 포스팅이 성공적으로 완료되었습니다.",
                 "title": post_data["title"],
                 "content_length": len(post_data["content"]),
-                "posted_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                "posted_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "session_id": self.session_id
             }
             
             logger.info("Blog posting completed successfully", result=result)
             return result
             
         except Exception as e:
-            logger.error("Blog posting failed", error=str(e))
+            logger.error("Blog posting failed", 
+                        error=str(e), 
+                        account_id=account_id, 
+                        session_id=self.session_id)
             raise e
             
         finally:
-            # Always cleanup
+            # Always cleanup browser and profile
             if self.driver:
                 try:
                     self.driver.quit()
                     logger.info("Chrome driver cleaned up")
                 except Exception as cleanup_error:
                     logger.warning("Failed to cleanup driver", error=str(cleanup_error))
+            
+            # Clean up isolated profile directory
+            self._cleanup_profile()
