@@ -1,7 +1,6 @@
 # blog_poster.py - Blog posting class for FastAPI immediate execution
 import os
 import time
-import pyperclip
 import structlog
 from typing import Optional
 from selenium import webdriver
@@ -48,6 +47,7 @@ class BlogPoster:
             opts.add_argument("--disable-extensions")
             opts.add_argument("--disable-plugins")
             opts.add_argument("--disable-images")
+            # JavaScript enabled for Naver login functionality
             
             # Security and stability
             opts.add_experimental_option("excludeSwitches", ["enable-logging", "enable-automation"])
@@ -76,15 +76,13 @@ class BlogPoster:
             # ID input
             id_input = self.wait.until(EC.presence_of_element_located((By.ID, "id")))
             id_input.clear()
-            pyperclip.copy(naver_id)
-            id_input.send_keys(Keys.CONTROL, "v")
+            id_input.send_keys(naver_id)
             time.sleep(0.5)
             
             # Password input
             pw_input = self.driver.find_element(By.ID, "pw")
             pw_input.clear()
-            pyperclip.copy(naver_password)
-            pw_input.send_keys(Keys.CONTROL, "v")
+            pw_input.send_keys(naver_password)
             time.sleep(0.5)
             
             # Login button
@@ -129,8 +127,7 @@ class BlogPoster:
             # Title input
             title_input = self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "se-input")))
             title_input.clear()
-            pyperclip.copy(title)
-            title_input.send_keys(Keys.CONTROL, "v")
+            title_input.send_keys(title)
             time.sleep(1)
             
             # Content input
@@ -138,8 +135,7 @@ class BlogPoster:
             content_area.click()
             time.sleep(1)
             
-            pyperclip.copy(content)
-            content_area.send_keys(Keys.CONTROL, "v")
+            content_area.send_keys(content)
             time.sleep(2)
             
             logger.info("Blog content written successfully")
