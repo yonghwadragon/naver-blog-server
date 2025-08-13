@@ -1,0 +1,57 @@
+# docker-compose.yml - Local development setup
+
+services:
+  # Redis for Celery broker and result backend
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  # FastAPI web server
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - LOG_LEVEL=info
+    volumes:
+      - ./:/app
+    depends_on:
+      - redis
+    restart: unless-stopped
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Celery worker
+  worker:
+    build: .
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - LOG_LEVEL=info
+    volumes:
+      - ./:/app
+    depends_on:
+      - redis
+    restart: unless-stopped
+    command: celery -A celery_app worker --loglevel=info --concurrency=2
+
+  # Celery flower (monitoring)
+  flower:
+    build: .
+    ports:
+      - "5555:5555"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./:/app
+    depends_on:
+      - redis
+      - worker
+    restart: unless-stopped
+    command: flower --broker=redis://redis:6379/0 --port=5555
+
+volumes:
+  redis_data:
