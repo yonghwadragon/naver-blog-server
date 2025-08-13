@@ -46,8 +46,8 @@ class BlogPoster:
             
             opts = Options()
             
-            # Headless mode for server environment
-            opts.add_argument("--headless")
+            # GUI mode for user interaction - headless disabled
+            # opts.add_argument("--headless")  # Disabled for manual login
             opts.add_argument("--no-sandbox")
             opts.add_argument("--disable-dev-shm-usage")
             opts.add_argument("--disable-gpu")
@@ -93,46 +93,65 @@ class BlogPoster:
             finally:
                 self.user_data_dir = None
     
-    def _naver_login(self, naver_id: str, naver_password: str):
-        """Login to Naver"""
+    def _wait_for_manual_login(self):
+        """Wait for user to manually login to Naver"""
         try:
-            logger.info("Starting Naver login", naver_id=naver_id)
+            logger.info("Opening Naver login page for manual login")
             
+            # Navigate to Naver login page
             self.driver.get("https://nid.naver.com/nidlogin.login")
-            time.sleep(2)
             
-            # ID input
-            id_input = self.wait.until(EC.presence_of_element_located((By.ID, "id")))
-            id_input.clear()
-            id_input.send_keys(naver_id)
-            time.sleep(0.5)
+            logger.info("Please login manually in the browser window...")
+            print("\n" + "="*60)
+            print("🌐 브라우저 창이 열렸습니다!")
+            print("📝 네이버 로그인을 직접 진행해주세요.")
+            print("   - 아이디/비밀번호 입력")
+            print("   - 캡차가 나타나면 해결")
+            print("   - 2차 인증이 있으면 진행")
+            print("💡 로그인이 완료되면 자동으로 다음 단계로 진행됩니다.")
+            print("="*60 + "\n")
             
-            # Password input
-            pw_input = self.driver.find_element(By.ID, "pw")
-            pw_input.clear()
-            pw_input.send_keys(naver_password)
-            time.sleep(0.5)
+            # Wait for successful login by checking URL change
+            max_wait_time = 300  # 5 minutes
+            start_time = time.time()
             
-            # Login button
-            login_btn = self.driver.find_element(By.ID, "log.login")
-            login_btn.click()
+            while time.time() - start_time < max_wait_time:
+                current_url = self.driver.current_url
+                
+                # Check if user has successfully logged in
+                if "nid.naver.com" not in current_url:
+                    # Additional verification - check for Naver main elements
+                    try:
+                        # Look for elements that indicate successful login
+                        # This could be Naver's main page or any page that's not the login page
+                        if "naver.com" in current_url and "nidlogin" not in current_url:
+                            logger.info("Manual login detected - successful!", current_url=current_url)
+                            print("✅ 로그인 성공이 확인되었습니다!")
+                            return
+                    except:
+                        pass
+                
+                # Check every 2 seconds
+                time.sleep(2)
+                
+                # Show progress dots
+                elapsed = int(time.time() - start_time)
+                if elapsed % 10 == 0:
+                    remaining = max_wait_time - elapsed
+                    print(f"⏳ 로그인 대기 중... (남은 시간: {remaining}초)")
             
-            time.sleep(3)
-            
-            # Check if login was successful
-            if "nid.naver.com" in self.driver.current_url:
-                raise Exception("로그인 실패 - 아이디/비밀번호를 확인해주세요")
-            
-            logger.info("Naver login successful")
+            # Timeout
+            raise Exception("로그인 대기 시간이 초과되었습니다. (5분)")
             
         except Exception as e:
-            logger.error("Naver login failed", error=str(e))
-            raise Exception(f"네이버 로그인 실패: {str(e)}")
+            logger.error("Manual login failed", error=str(e))
+            raise Exception(f"수동 로그인 실패: {str(e)}")
     
     def _navigate_to_blog_write(self):
         """Navigate to blog write page"""
         try:
             logger.info("Navigating to blog write page")
+            print("📝 네이버 블로그 글쓰기 페이지로 이동 중...")
             
             self.driver.get("https://blog.naver.com/GoBlogWrite.naver")
             time.sleep(3)
@@ -142,6 +161,7 @@ class BlogPoster:
             self.driver.switch_to.frame(iframe)
             
             logger.info("Navigated to blog write page successfully")
+            print("✅ 블로그 글쓰기 페이지 이동 완료!")
             
         except Exception as e:
             logger.error("Failed to navigate to blog write page", error=str(e))
@@ -151,22 +171,41 @@ class BlogPoster:
         """Write blog title and content"""
         try:
             logger.info("Writing blog content", title_length=len(title), content_length=len(content))
+            print(f"✏️  블로그 제목 입력 중: '{title}'")
             
             # Title input
             title_input = self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "se-input")))
             title_input.clear()
-            title_input.send_keys(title)
-            time.sleep(1)
+            
+            # Type title character by character for visual effect
+            for char in title:
+                title_input.send_keys(char)
+                time.sleep(0.05)  # Small delay for visual effect
+            
+            print("✅ 제목 입력 완료!")
+            print(f"📄 블로그 내용 입력 중... ({len(content)}자)")
             
             # Content input
             content_area = self.wait.until(EC.element_to_be_clickable((By.CLASS_NAME, "se-content")))
             content_area.click()
             time.sleep(1)
             
-            content_area.send_keys(content)
-            time.sleep(2)
+            # Type content with visual feedback
+            content_lines = content.split('\n')
+            for i, line in enumerate(content_lines):
+                content_area.send_keys(line)
+                if i < len(content_lines) - 1:
+                    content_area.send_keys('\n')
+                
+                # Show progress for long content
+                if len(content_lines) > 10 and (i + 1) % 5 == 0:
+                    progress = int((i + 1) / len(content_lines) * 100)
+                    print(f"   진행률: {progress}% ({i + 1}/{len(content_lines)} 줄)")
+                
+                time.sleep(0.1)
             
             logger.info("Blog content written successfully")
+            print("✅ 블로그 내용 입력 완료!")
             
         except Exception as e:
             logger.error("Failed to write blog content", error=str(e))
@@ -176,21 +215,25 @@ class BlogPoster:
         """Publish the blog post"""
         try:
             logger.info("Publishing blog post")
+            print("🚀 블로그 발행 중...")
             
             # Find and click publish button
             publish_btn = self.wait.until(EC.element_to_be_clickable((By.CLASS_NAME, "publish_btn")))
             publish_btn.click()
             time.sleep(2)
+            print("   발행 버튼 클릭 완료")
             
             # Handle any confirmation dialogs
             try:
                 confirm_btn = self.driver.find_element(By.XPATH, "//button[contains(text(), '발행')]")
                 confirm_btn.click()
                 time.sleep(2)
+                print("   확인 대화상자 처리 완료")
             except NoSuchElementException:
-                pass  # No confirmation dialog
+                print("   확인 대화상자 없음 - 바로 발행")
             
             logger.info("Blog post published successfully")
+            print("🎉 블로그 발행 완료!")
             
         except Exception as e:
             logger.error("Failed to publish blog post", error=str(e))
@@ -212,8 +255,8 @@ class BlogPoster:
             self.driver = self._init_driver(account_id)
             self.wait = WebDriverWait(self.driver, 15)
             
-            # Login to Naver
-            self._naver_login(naver_account["id"], naver_account["password"])
+            # Manual login (no credentials needed)
+            self._wait_for_manual_login()
             
             # Navigate to blog write page
             self._navigate_to_blog_write()

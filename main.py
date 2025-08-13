@@ -50,7 +50,7 @@ app.add_middleware(
 # Pydantic models
 class NaverAccount(BaseModel):
     id: str
-    password: str
+    # password: str  # Not needed for manual login
 
 class PostData(BaseModel):
     title: str
