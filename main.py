@@ -7,9 +7,10 @@ import uuid
 import json
 import structlog
 from datetime import datetime
+import asyncio
 
-# Task queue imports
-from celery_app import celery_app, naver_blog_posting_task
+# Direct import of BlogPoster for immediate execution
+from blog_poster import BlogPoster
 
 # Configure structured logging
 structlog.configure(
@@ -73,7 +74,7 @@ class TaskStatusResponse(BaseModel):
     error: Optional[str] = None
     progress: Optional[int] = None
 
-# In-memory task storage (replace with Redis in production)
+# In-memory task storage for tracking
 task_storage: Dict[str, Dict] = {}
 
 @app.get("/")
@@ -88,24 +89,50 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Detailed health check"""
+    return {
+        "status": "healthy",
+        "execution_mode": "immediate",
+        "timestamp": datetime.now().isoformat()
+    }
+
+async def execute_blog_posting_task(task_id: str, post_data: dict, naver_account: dict):
+    """
+    Execute blog posting task immediately in background
+    """
     try:
-        # Check Celery worker status
-        inspect = celery_app.control.inspect()
-        active_workers = inspect.active()
+        # Update task status to in_progress
+        task_storage[task_id]["status"] = "in_progress"
+        task_storage[task_id]["progress"] = 10
         
-        return {
-            "status": "healthy",
-            "celery_workers": len(active_workers) if active_workers else 0,
-            "timestamp": datetime.now().isoformat()
-        }
+        # Create BlogPoster instance and execute
+        blog_poster = BlogPoster()
+        
+        # Execute blog posting
+        result = await asyncio.to_thread(
+            blog_poster.post_to_naver_blog,
+            post_data,
+            naver_account
+        )
+        
+        # Update task status to completed
+        task_storage[task_id]["status"] = "completed"
+        task_storage[task_id]["progress"] = 100
+        task_storage[task_id]["result"] = result
+        
+        logger.info("Blog posting completed successfully", task_id=task_id)
+        
     except Exception as e:
-        logger.error("Health check failed", error=str(e))
-        raise HTTPException(status_code=503, detail="Service unavailable")
+        # Update task status to failed
+        task_storage[task_id]["status"] = "failed"
+        task_storage[task_id]["error"] = str(e)
+        task_storage[task_id]["progress"] = 0
+        
+        logger.error("Blog posting failed", task_id=task_id, error=str(e))
 
 @app.post("/api/blog/post", response_model=TaskResponse)
-async def create_blog_post(request: BlogPostRequest):
+async def create_blog_post(request: BlogPostRequest, background_tasks: BackgroundTasks):
     """
-    Start a new blog posting task
+    Start a new blog posting task with immediate execution
     """
     try:
         # Generate unique task ID
@@ -120,20 +147,21 @@ async def create_blog_post(request: BlogPostRequest):
             naver_account=request.naverAccount.id
         )
         
-        # Submit task to Celery
-        celery_task = naver_blog_posting_task.delay(
-            task_id=task_id,
-            post_data=request.postData.dict(),
-            naver_account=request.naverAccount.dict()
-        )
-        
-        # Store task info
+        # Store initial task info
         task_storage[task_id] = {
-            "celery_task_id": celery_task.id,
             "status": "pending",
             "created_at": datetime.now().isoformat(),
-            "post_title": request.postData.title
+            "post_title": request.postData.title,
+            "progress": 0
         }
+        
+        # Execute task in background
+        background_tasks.add_task(
+            execute_blog_posting_task,
+            task_id,
+            request.postData.dict(),
+            request.naverAccount.dict()
+        )
         
         return TaskResponse(
             task_id=task_id,
@@ -155,47 +183,13 @@ async def get_task_status(task_id: str):
     
     try:
         task_info = task_storage[task_id]
-        celery_task_id = task_info["celery_task_id"]
-        
-        # Get task result from Celery
-        celery_task = celery_app.AsyncResult(celery_task_id)
-        
-        # Update task status
-        if celery_task.state == "PENDING":
-            status = "pending"
-            result = None
-            error = None
-            progress = 0
-        elif celery_task.state == "PROGRESS":
-            status = "in_progress"
-            result = celery_task.result
-            error = None
-            progress = result.get("progress", 0) if result else 0
-        elif celery_task.state == "SUCCESS":
-            status = "completed"
-            result = celery_task.result
-            error = None
-            progress = 100
-        elif celery_task.state == "FAILURE":
-            status = "failed"
-            result = None
-            error = str(celery_task.result)
-            progress = 0
-        else:
-            status = celery_task.state.lower()
-            result = celery_task.result if hasattr(celery_task, 'result') else None
-            error = None
-            progress = 0
-        
-        # Update stored task info
-        task_storage[task_id]["status"] = status
         
         return TaskStatusResponse(
             task_id=task_id,
-            status=status,
-            result=result,
-            error=error,
-            progress=progress
+            status=task_info.get("status", "pending"),
+            result=task_info.get("result"),
+            error=task_info.get("error"),
+            progress=task_info.get("progress", 0)
         )
         
     except Exception as e:
@@ -205,19 +199,13 @@ async def get_task_status(task_id: str):
 @app.delete("/api/blog/task/{task_id}")
 async def cancel_task(task_id: str):
     """
-    Cancel a running task
+    Cancel a running task (limited support for immediate execution)
     """
     if task_id not in task_storage:
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
     
     try:
-        task_info = task_storage[task_id]
-        celery_task_id = task_info["celery_task_id"]
-        
-        # Revoke the Celery task
-        celery_app.control.revoke(celery_task_id, terminate=True)
-        
-        # Update task status
+        # Update task status to cancelled
         task_storage[task_id]["status"] = "cancelled"
         
         logger.info("Task cancelled", task_id=task_id)

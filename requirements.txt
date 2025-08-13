@@ -10,10 +10,10 @@ selenium==4.15.2
 webdriver-manager==4.0.2
 pyperclip==1.8.2
 
-# Task queue
-celery[redis]==5.3.4
-redis>=4.5.2,<5.0.0
-flower>=2.0.0
+# Background tasks (using FastAPI BackgroundTasks instead of Celery)
+# celery[redis]==5.3.4
+# redis>=4.5.2,<5.0.0
+# flower>=2.0.0
 
 # Monitoring
 structlog==23.2.0
