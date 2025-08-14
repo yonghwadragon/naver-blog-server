@@ -69,8 +69,29 @@ class BlogPoster:
             # Fix for "user data directory already in use" error
             import tempfile
             import uuid
+            import os
+            import shutil
+            
+            # Create unique temporary directory
             temp_dir = tempfile.mkdtemp(prefix=f"chrome_user_data_{uuid.uuid4().hex[:8]}_")
+            
+            # Ensure directory is writable
+            os.chmod(temp_dir, 0o755)
+            
+            # Clean up any existing Chrome processes (kill zombies)
+            try:
+                import subprocess
+                subprocess.run(['pkill', '-f', 'chrome'], check=False, capture_output=True)
+                subprocess.run(['pkill', '-f', 'chromium'], check=False, capture_output=True)
+            except:
+                pass
+            
             opts.add_argument(f"--user-data-dir={temp_dir}")
+            
+            # Additional isolation arguments
+            opts.add_argument("--no-first-run")
+            opts.add_argument("--no-default-browser-check")
+            opts.add_argument("--disable-default-apps")
             
             # Additional cloud environment fixes
             opts.add_argument("--disable-background-timer-throttling")
@@ -275,3 +296,11 @@ class BlogPoster:
                     logger.warning("Failed to cleanup driver", 
                                   task_id=self.task_id, 
                                   error=str(cleanup_error))
+                
+                # Force kill any remaining Chrome processes
+                try:
+                    import subprocess
+                    subprocess.run(['pkill', '-f', 'chrome'], check=False, capture_output=True)
+                    subprocess.run(['pkill', '-f', 'chromium'], check=False, capture_output=True)
+                except:
+                    pass
