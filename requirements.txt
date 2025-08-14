@@ -5,7 +5,10 @@ pydantic==2.5.0
 python-multipart==0.0.6
 python-dotenv==1.0.0
 
-# Browser automation
+# Browser automation - switching to pyppeteer for better cloud support
+pyppeteer==1.0.2
+
+# Legacy selenium (keeping as fallback)
 selenium==4.15.2
 webdriver-manager==4.0.2
 # pyperclip==1.8.2  # Removed: Not compatible with headless server environments

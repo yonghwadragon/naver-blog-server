@@ -6,6 +6,19 @@ import uuid
 import tempfile
 import shutil
 from typing import Optional
+
+# Import both Selenium and Puppeteer for fallback support
+try:
+    from naver_blog_puppeteer import post_blog_with_puppeteer
+    PUPPETEER_AVAILABLE = True
+    logger = structlog.get_logger()
+    logger.info("Puppeteer automation module loaded successfully")
+except ImportError as e:
+    PUPPETEER_AVAILABLE = False
+    logger = structlog.get_logger()
+    logger.warning("Puppeteer not available, falling back to Selenium", error=str(e))
+
+# Selenium imports (fallback)
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
@@ -290,12 +303,39 @@ class BlogPoster:
     
     def post_to_naver_blog(self, post_data: dict, naver_account: dict) -> dict:
         """
-        Main method to post a blog entry to Naver blog with security isolation
+        Main method to post a blog entry to Naver blog with Puppeteer (preferred) or Selenium fallback
         """
         account_id = naver_account.get("id", "unknown")
         
+        # Try Puppeteer first (more stable for cloud environments)
+        if PUPPETEER_AVAILABLE:
+            try:
+                logger.info("Attempting blog posting with Puppeteer (preferred)", 
+                           title=post_data.get("title"), 
+                           naver_id=account_id,
+                           session_id=self.session_id)
+                
+                result = post_blog_with_puppeteer(
+                    naver_id=account_id,
+                    task_id=self.session_id,
+                    title=post_data["title"],
+                    content=post_data["content"],
+                    category=post_data.get("category"),
+                    tags=post_data.get("tags"),
+                    progress_callback=None  # Could add callback support later
+                )
+                
+                logger.info("Blog posting completed successfully with Puppeteer", result=result)
+                return result
+                
+            except Exception as puppeteer_error:
+                logger.warning("Puppeteer failed, falling back to Selenium", 
+                              error=str(puppeteer_error))
+                # Continue to Selenium fallback below
+        
+        # Selenium fallback
         try:
-            logger.info("Starting blog posting task with isolated session", 
+            logger.info("Starting blog posting task with Selenium fallback", 
                        title=post_data.get("title"), 
                        naver_id=account_id,
                        session_id=self.session_id)
@@ -321,26 +361,28 @@ class BlogPoster:
             
             result = {
                 "success": True,
-                "message": "네이버 블로그 포스팅이 성공적으로 완료되었습니다.",
+                "message": "네이버 블로그 포스팅이 성공적으로 완료되었습니다. (Selenium 사용)",
                 "title": post_data["title"],
                 "content_length": len(post_data["content"]),
                 "posted_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "session_id": self.session_id
+                "session_id": self.session_id,
+                "automation_engine": "Selenium"
             }
             
-            logger.info("Blog posting completed successfully", result=result)
+            logger.info("Blog posting completed successfully with Selenium", result=result)
             return result
             
         except Exception as e:
-            logger.error("Blog posting failed", 
+            logger.error("Both Puppeteer and Selenium failed", 
+                        puppeteer_available=PUPPETEER_AVAILABLE,
                         error=str(e), 
                         account_id=account_id, 
                         session_id=self.session_id)
             raise e
             
         finally:
-            # Always cleanup browser and profile
-            if self.driver:
+            # Always cleanup browser and profile (Selenium only)
+            if hasattr(self, 'driver') and self.driver:
                 try:
                     self.driver.quit()
                     logger.info("Chrome driver cleaned up")
