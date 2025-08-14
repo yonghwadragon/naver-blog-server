@@ -40,8 +40,22 @@ class BlogPoster:
             logger.info("Initializing Chrome driver with isolated profile", 
                        account_id=account_id, session_id=self.session_id)
             
-            # Create isolated user data directory for this account
-            self.user_data_dir = tempfile.mkdtemp(prefix=f'naver-{account_id}-{self.session_id[:8]}-')
+            # Clean up any existing profile directory first
+            self._cleanup_profile()
+            
+            # Create unique isolated user data directory
+            import hashlib
+            unique_id = hashlib.md5(f"{account_id}-{self.session_id}-{time.time()}".encode()).hexdigest()[:8]
+            self.user_data_dir = tempfile.mkdtemp(prefix=f'naver-{unique_id}-')
+            
+            # Ensure directory is empty and accessible
+            if os.path.exists(self.user_data_dir):
+                try:
+                    shutil.rmtree(self.user_data_dir, ignore_errors=True)
+                except:
+                    pass
+            os.makedirs(self.user_data_dir, exist_ok=True)
+            
             logger.info("Created isolated profile directory", user_data_dir=self.user_data_dir)
             
             opts = Options()
@@ -55,8 +69,12 @@ class BlogPoster:
             
             # Isolated user profile for security
             opts.add_argument(f"--user-data-dir={self.user_data_dir}")
+            opts.add_argument("--no-first-run")
+            opts.add_argument("--no-default-browser-check")
             opts.add_argument("--disable-web-security")
             opts.add_argument("--disable-features=VizDisplayCompositor")
+            opts.add_argument("--disable-backgrounding-occluded-windows")
+            opts.add_argument("--disable-renderer-backgrounding")
             
             # Performance optimizations
             opts.add_argument("--disable-extensions")
@@ -85,13 +103,44 @@ class BlogPoster:
         """Clean up the isolated user profile directory"""
         if self.user_data_dir and os.path.exists(self.user_data_dir):
             try:
-                shutil.rmtree(self.user_data_dir, ignore_errors=True)
-                logger.info("Cleaned up profile directory", user_data_dir=self.user_data_dir)
+                # Force close any handles before cleanup
+                import gc
+                gc.collect()
+                
+                # Multiple cleanup attempts
+                for attempt in range(3):
+                    try:
+                        shutil.rmtree(self.user_data_dir, ignore_errors=True)
+                        if not os.path.exists(self.user_data_dir):
+                            logger.info("Cleaned up profile directory", user_data_dir=self.user_data_dir)
+                            break
+                        time.sleep(0.5)  # Wait between attempts
+                    except Exception as e:
+                        logger.warning(f"Cleanup attempt {attempt + 1} failed", 
+                                     user_data_dir=self.user_data_dir, error=str(e))
+                        if attempt == 2:  # Last attempt
+                            logger.error("Final cleanup attempt failed", 
+                                       user_data_dir=self.user_data_dir, error=str(e))
+                            
             except Exception as e:
                 logger.warning("Failed to clean up profile directory", 
                               user_data_dir=self.user_data_dir, error=str(e))
             finally:
                 self.user_data_dir = None
+    
+    def _cleanup_all_temp_profiles(self):
+        """Clean up any leftover temporary profile directories"""
+        try:
+            temp_dir = tempfile.gettempdir()
+            for item in os.listdir(temp_dir):
+                if item.startswith('naver-') and os.path.isdir(os.path.join(temp_dir, item)):
+                    try:
+                        shutil.rmtree(os.path.join(temp_dir, item), ignore_errors=True)
+                        logger.info("Cleaned up leftover profile", profile_dir=item)
+                    except:
+                        pass  # Ignore cleanup errors for old profiles
+        except Exception as e:
+            logger.warning("Failed to cleanup leftover profiles", error=str(e))
     
     def _wait_for_manual_login(self):
         """Wait for user to manually login to Naver"""
@@ -250,6 +299,9 @@ class BlogPoster:
                        title=post_data.get("title"), 
                        naver_id=account_id,
                        session_id=self.session_id)
+            
+            # Clean up any leftover profiles first
+            self._cleanup_all_temp_profiles()
             
             # Initialize driver with isolated profile
             self.driver = self._init_driver(account_id)

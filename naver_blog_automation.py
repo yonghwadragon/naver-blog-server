@@ -66,11 +66,25 @@ class BlogPoster:
             opts.add_argument("--disable-gpu")
             opts.add_argument("--window-size=1920,1080")
             
+            # Fix for "user data directory already in use" error
+            import tempfile
+            import uuid
+            temp_dir = tempfile.mkdtemp(prefix=f"chrome_user_data_{uuid.uuid4().hex[:8]}_")
+            opts.add_argument(f"--user-data-dir={temp_dir}")
+            
+            # Additional cloud environment fixes
+            opts.add_argument("--disable-background-timer-throttling")
+            opts.add_argument("--disable-backgrounding-occluded-windows")
+            opts.add_argument("--disable-renderer-backgrounding")
+            opts.add_argument("--disable-features=VizDisplayCompositor")
+            opts.add_argument("--disable-ipc-flooding-protection")
+            opts.add_argument("--single-process")  # Render cloud environment
+            
             # Performance optimizations
             opts.add_argument("--disable-extensions")
             opts.add_argument("--disable-plugins")
             opts.add_argument("--disable-images")
-            opts.add_argument("--disable-javascript")  # Remove this if JS is needed
+            # Remove --disable-javascript as Naver blog needs JS
             
             # Security and stability
             opts.add_experimental_option("excludeSwitches", ["enable-logging", "enable-automation"])
@@ -81,7 +95,9 @@ class BlogPoster:
             driver = webdriver.Chrome(service=service, options=opts)
             driver.set_page_load_timeout(30)
             
-            logger.info("Chrome driver initialized successfully", task_id=self.task_id)
+            logger.info("Chrome driver initialized successfully", 
+                       task_id=self.task_id, 
+                       user_data_dir=temp_dir)
             return driver
             
         except Exception as e:
