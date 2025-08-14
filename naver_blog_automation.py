@@ -93,6 +93,20 @@ class BlogPoster:
             opts.add_argument("--no-default-browser-check")
             opts.add_argument("--disable-default-apps")
             
+            # Even more aggressive Chrome options for cloud environments
+            opts.add_argument("--remote-debugging-port=0")  # Disable remote debugging
+            opts.add_argument("--disable-web-security")
+            opts.add_argument("--disable-features=VizDisplayCompositor,VizHitTestSurfaceLayer")
+            opts.add_argument("--run-all-compositor-stages-before-draw")
+            opts.add_argument("--disable-background-networking")
+            opts.add_argument("--disable-background-mode")
+            opts.add_argument("--disable-client-side-phishing-detection")
+            opts.add_argument("--disable-sync")
+            opts.add_argument("--metrics-recording-only")
+            opts.add_argument("--no-pings")
+            opts.add_argument("--password-store=basic")
+            opts.add_argument("--use-mock-keychain")
+            
             # Additional cloud environment fixes
             opts.add_argument("--disable-background-timer-throttling")
             opts.add_argument("--disable-backgrounding-occluded-windows")
