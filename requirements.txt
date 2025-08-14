@@ -7,6 +7,7 @@ python-dotenv==1.0.0
 
 # Browser automation - switching to pyppeteer for better cloud support
 pyppeteer==1.0.2
+playwright==1.40.0
 
 # Legacy selenium (keeping as fallback)
 selenium==4.15.2
