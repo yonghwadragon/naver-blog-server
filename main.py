@@ -10,7 +10,7 @@ from datetime import datetime
 import asyncio
 
 # Direct import of BlogPoster for immediate execution
-from blog_poster import BlogPoster
+from blog_poster import BlogPoster, PUPPETEER_AVAILABLE
 
 # Configure structured logging
 structlog.configure(
@@ -95,6 +95,8 @@ async def health_check():
     return {
         "status": "healthy",
         "execution_mode": "immediate",
+        "puppeteer_available": PUPPETEER_AVAILABLE,
+        "automation_engine": "Puppeteer" if PUPPETEER_AVAILABLE else "Selenium",
         "timestamp": datetime.now().isoformat()
     }
 
